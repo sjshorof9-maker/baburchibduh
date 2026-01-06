@@ -100,20 +100,33 @@ const ModeratorLeads: React.FC<ModeratorLeadsProps> = ({ leads, onUpdateStatus }
                     <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Call Target</p>
                     <p className="text-2xl font-black text-slate-800 font-mono tracking-tighter">{lead.phoneNumber}</p>
                   </div>
-                  <button 
-                    onClick={() => handleCopy(lead.phoneNumber, lead.id)}
-                    className={`p-3 rounded-xl border transition-all active:scale-90 flex items-center gap-2 shadow-sm ${
-                      copiedId === lead.id 
-                      ? 'bg-emerald-500 border-emerald-500 text-white' 
-                      : 'bg-white border-slate-200 text-slate-600 hover:border-blue-600 hover:text-blue-600'
-                    }`}
-                  >
-                    {copiedId === lead.id ? (
-                      <span className="text-[10px] font-black uppercase tracking-widest px-1">Copied!</span>
-                    ) : (
-                      <span className="text-lg">📋</span>
-                    )}
-                  </button>
+                  <div className="flex gap-2">
+                    {/* Direct Dial Button */}
+                    <a 
+                      href={`tel:${lead.phoneNumber}`}
+                      title="Call Now"
+                      className="p-3 rounded-xl border border-slate-200 bg-white text-blue-600 hover:border-blue-600 hover:bg-blue-50 transition-all active:scale-90 shadow-sm flex items-center justify-center"
+                    >
+                      <span className="text-lg">📞</span>
+                    </a>
+                    
+                    {/* Copy Button */}
+                    <button 
+                      onClick={() => handleCopy(lead.phoneNumber, lead.id)}
+                      title="Copy Number"
+                      className={`p-3 rounded-xl border transition-all active:scale-90 flex items-center gap-2 shadow-sm ${
+                        copiedId === lead.id 
+                        ? 'bg-emerald-500 border-emerald-500 text-white' 
+                        : 'bg-white border-slate-200 text-slate-600 hover:border-blue-600 hover:text-blue-600'
+                      }`}
+                    >
+                      {copiedId === lead.id ? (
+                        <span className="text-[10px] font-black uppercase tracking-widest px-1">Copied!</span>
+                      ) : (
+                        <span className="text-lg">📋</span>
+                      )}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex gap-3 pt-2">
