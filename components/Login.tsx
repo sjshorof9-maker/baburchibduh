@@ -34,7 +34,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, moderators, logoUrl }) => {
         }
       }
 
-      // 2. Check in Supabase moderators table including password verification
+      // 2. Check in Supabase moderators table
       const { data: dbUser, error: dbError } = await supabase
         .from('moderators')
         .select('*')
@@ -42,9 +42,16 @@ const Login: React.FC<LoginProps> = ({ onLogin, moderators, logoUrl }) => {
         .single();
 
       if (dbError || !dbUser) {
-        setError('Unauthorized access. User not found.');
+        setError('Unauthorized access. User identity not found.');
       } else {
-        // Verify the password from the database
+        // SECURITY CHECK: Verify if account is active
+        if (dbUser.is_active === false) {
+          setError('🚫 Access Denied: Your account has been deactivated. Please contact your Administrator.');
+          setIsLoading(false);
+          return;
+        }
+
+        // Verify the password
         if (dbUser.password === password) {
           onLogin({
             id: dbUser.id,
@@ -53,12 +60,12 @@ const Login: React.FC<LoginProps> = ({ onLogin, moderators, logoUrl }) => {
             role: dbUser.role as UserRole
           });
         } else {
-          setError('Incorrect password for moderator.');
+          setError('Incorrect password for moderator session.');
         }
       }
     } catch (err) {
       console.error(err);
-      setError('Connection error. Please try again.');
+      setError('Connection failure. Check your internet or try again.');
     } finally {
       setIsLoading(false);
     }
@@ -94,7 +101,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, moderators, logoUrl }) => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none transition-all text-sm font-bold text-slate-700"
-                  placeholder="Enter your email"
+                  placeholder="Enter your registered email"
                 />
               </div>
               <div className="space-y-2">
@@ -111,8 +118,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, moderators, logoUrl }) => {
             </div>
 
             {error && (
-              <div className="p-4 rounded-2xl bg-rose-50 border border-rose-100">
-                <p className="text-xs text-rose-600 font-bold">{error}</p>
+              <div className="p-4 rounded-2xl bg-rose-50 border border-rose-100 animate-in fade-in zoom-in-95 duration-200">
+                <p className="text-xs text-rose-600 font-bold leading-relaxed">{error}</p>
               </div>
             )}
 
@@ -121,7 +128,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, moderators, logoUrl }) => {
               disabled={isLoading}
               className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-slate-300 text-white font-black py-5 rounded-2xl transition-all shadow-xl shadow-orange-500/20 active:scale-[0.98] uppercase tracking-widest text-xs"
             >
-              {isLoading ? 'Verifying...' : 'Authorize Session'}
+              {isLoading ? 'Verifying Identity...' : 'Authorize Session'}
             </button>
           </form>
 

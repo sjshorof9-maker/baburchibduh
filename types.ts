@@ -46,6 +46,8 @@ export interface CourierConfig {
 export interface Lead {
   id: string;
   phoneNumber: string;
+  customerName?: string; // Added for CRM auto-fill
+  address?: string;      // Added for CRM auto-fill
   moderatorId: string;
   status: 'new' | 'called';
   assignedDate: string; // YYYY-MM-DD

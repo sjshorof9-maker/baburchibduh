@@ -55,8 +55,9 @@ const Settings: React.FC<SettingsProps> = ({ config, onSave, logoUrl, onUpdateLo
     try {
       const result = await testSteadfastConnection(formData);
       setTestResult(result);
+      if (result.message) alert(result.message);
     } catch (err: any) {
-      setTestResult({ success: false, message: err.message });
+      alert(err.message);
     } finally {
       setIsSaving(false);
     }
@@ -128,7 +129,7 @@ const Settings: React.FC<SettingsProps> = ({ config, onSave, logoUrl, onUpdateLo
                   <img src="https://portal.steadfast.com.bd/assets/img/logo.png" alt="Steadfast" className="w-full object-contain" />
                 </div>
                 <div>
-                  <h3 className="text-2xl font-bold">Courier Sync</h3>
+                  <h3 className="text-2xl font-bold">Steadfast Courier</h3>
                   <div className="flex items-center gap-2 mt-1">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                     <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Global Logistics Active</span>
@@ -184,6 +185,16 @@ const Settings: React.FC<SettingsProps> = ({ config, onSave, logoUrl, onUpdateLo
                     value={formData.secretKey}
                     onChange={(e) => setFormData({...formData, secretKey: e.target.value})}
                     className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none transition-all text-xs font-mono font-bold"
+                  />
+                </div>
+                <div className="md:col-span-2 space-y-2">
+                  <label className="text-[11px] font-black text-slate-400 uppercase ml-1">Webhook URL</label>
+                  <input
+                    type="url"
+                    value={formData.webhookUrl}
+                    onChange={(e) => setFormData({...formData, webhookUrl: e.target.value})}
+                    className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none transition-all text-xs font-mono text-slate-500"
+                    placeholder="https://your-domain.com/api/webhooks/steadfast"
                   />
                 </div>
             </div>

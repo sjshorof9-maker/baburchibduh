@@ -1,20 +1,36 @@
 
-import React, { useState } from 'react';
-import { Product, Order, OrderStatus, User, OrderItem } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Product, Order, OrderStatus, User, OrderItem, Lead } from '../types';
 
 interface OrderFormProps {
   products: Product[];
   currentUser: User;
   onOrderCreate: (order: Order) => Promise<void>;
+  leads?: Lead[]; // Added leads for auto-fill lookup
 }
 
-const OrderForm: React.FC<OrderFormProps> = ({ products, currentUser, onOrderCreate }) => {
+const OrderForm: React.FC<OrderFormProps> = ({ products, currentUser, onOrderCreate, leads = [] }) => {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [selectedItems, setSelectedItems] = useState<{productId: string, quantity: number}[]>([]);
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [autoFilled, setAutoFilled] = useState(false);
+
+  // Auto-fill lookup effect
+  useEffect(() => {
+    if (customerPhone.length >= 11) {
+      const match = leads.find(l => l.phoneNumber.includes(customerPhone.trim()));
+      if (match && (match.customerName || match.address)) {
+        if (match.customerName && !customerName) setCustomerName(match.customerName);
+        if (match.address && !customerAddress) setCustomerAddress(match.address);
+        setAutoFilled(true);
+        // Clear indicator after 3 seconds
+        setTimeout(() => setAutoFilled(false), 3000);
+      }
+    }
+  }, [customerPhone, leads]);
 
   const addItem = () => {
     if (products.length === 0) return;
@@ -51,7 +67,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ products, currentUser, onOrderCre
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // UI Validation
     if (selectedItems.length === 0) {
       alert('Please add at least one product.');
       return;
@@ -92,10 +107,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ products, currentUser, onOrderCre
         notes: notes.trim()
       };
 
-      // Call parent handleCreateOrder which interacts with Supabase
       await onOrderCreate(newOrder);
       
-      // Success - Reset form
       setCustomerName('');
       setCustomerPhone('');
       setCustomerAddress('');
@@ -112,9 +125,16 @@ const OrderForm: React.FC<OrderFormProps> = ({ products, currentUser, onOrderCre
 
   return (
     <div className="max-w-6xl mx-auto">
-      <div className="mb-10 text-center md:text-left">
-        <h2 className="text-3xl font-black text-slate-900 tracking-tight">Add New Booking</h2>
-        <p className="text-slate-500 font-medium italic">Enter customer shipment details below.</p>
+      <div className="mb-10 text-center md:text-left flex justify-between items-end">
+        <div>
+          <h2 className="text-3xl font-black text-slate-900 tracking-tight">Add New Booking</h2>
+          <p className="text-slate-500 font-medium italic">Enter customer shipment details below.</p>
+        </div>
+        {autoFilled && (
+          <div className="bg-emerald-50 text-emerald-600 px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest animate-bounce border border-emerald-100 shadow-sm">
+            ✨ Auto-filled from Leads
+          </div>
+        )}
       </div>
 
       <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-3 gap-10">
@@ -123,12 +143,15 @@ const OrderForm: React.FC<OrderFormProps> = ({ products, currentUser, onOrderCre
             <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-8 border-b border-slate-50 pb-4">Recipient Information</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Full Name</label>
-                <input required type="text" value={customerName} onChange={(e) => setCustomerName(e.target.value)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none transition-all font-bold" placeholder="e.g. Kashem Ali" />
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Phone Number</label>
+                <div className="relative">
+                   <input required type="tel" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none transition-all font-bold" placeholder="017XXXXXXXX" />
+                   <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300">📞</div>
+                </div>
               </div>
               <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Phone Number</label>
-                <input required type="tel" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none transition-all font-bold" placeholder="017XXXXXXXX" />
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Full Name</label>
+                <input required type="text" value={customerName} onChange={(e) => setCustomerName(e.target.value)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none transition-all font-bold" placeholder="e.g. Kashem Ali" />
               </div>
               <div className="md:col-span-2 space-y-2">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Delivery Address</label>
