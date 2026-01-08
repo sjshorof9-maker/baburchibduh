@@ -1,37 +1,34 @@
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { User, UserRole, Lead, Order } from '../types';
-import { supabase } from '../services/supabase';
 
 interface ModeratorManagerProps {
   moderators: User[];
   leads: Lead[];
   orders: Order[];
-  onAddModerator: (moderator: User & { password?: string, is_active?: boolean }) => void;
-  onDeleteModerator: (modId: string) => void;
+  onAddModerator: (moderator: User & { password?: string }) => Promise<boolean | undefined>;
+  onDeleteModerator: (modId: string) => Promise<void>;
+  onToggleStatus: (modId: string, isActive: boolean) => Promise<void>;
 }
 
-const ModeratorManager: React.FC<ModeratorManagerProps> = ({ moderators, leads, orders, onAddModerator, onDeleteModerator }) => {
+const ModeratorManager: React.FC<ModeratorManagerProps> = ({ moderators, leads, orders, onAddModerator, onDeleteModerator, onToggleStatus }) => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isAdding, setIsAdding] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [actionId, setActionId] = useState<string | null>(null);
 
-  // Helper for Bangladesh Standard Time (UTC+6)
-  const getBSTToday = () => {
-    const d = new Date();
-    const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
-    return new Date(utc + (3600000 * 6)).toISOString().split('T')[0];
-  };
+  const todayStr = new Date().toISOString().split('T')[0];
 
-  const todayBST = getBSTToday();
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !email || !password) return;
+    if (!name.trim() || !email.trim() || !password.trim() || isVerifying) return;
 
+    setIsVerifying(true);
     const newModerator = {
-      id: `m-${Date.now()}`,
+      id: '', 
       name: name.trim(),
       email: email.toLowerCase().trim(),
       role: UserRole.MODERATOR,
@@ -39,176 +36,261 @@ const ModeratorManager: React.FC<ModeratorManagerProps> = ({ moderators, leads, 
       is_active: true
     };
 
-    onAddModerator(newModerator);
-    setName('');
-    setEmail('');
-    setPassword('');
-    setIsAdding(false);
-  };
-
-  const toggleStatus = async (modId: string, currentStatus: boolean = true) => {
-    const newStatus = !currentStatus;
-    const { error } = await supabase
-      .from('moderators')
-      .update({ is_active: newStatus })
-      .eq('id', modId);
+    const success = await onAddModerator(newModerator);
     
-    if (error) {
-      alert("Failed to update status: " + error.message);
-    } else {
-      window.location.reload(); 
+    if (success) {
+      setName('');
+      setEmail('');
+      setPassword('');
+      setIsAdding(false);
     }
+    setIsVerifying(false);
   };
 
   const isOnline = (lastSeen?: string) => {
     if (!lastSeen) return false;
     const diff = Date.now() - new Date(lastSeen).getTime();
-    return diff < 90000; 
+    return diff < 120000; 
   };
 
-  const getModPerformance = (modId: string) => {
-    const modOrders = orders.filter(o => o.moderatorId === modId);
-    const modLeads = leads.filter(l => l.moderatorId === modId);
-    
-    const todayOrders = modOrders.filter(o => {
-      const orderDate = new Date(o.createdAt);
-      const orderUtc = orderDate.getTime() + (orderDate.getTimezoneOffset() * 60000);
-      const orderBst = new Date(orderUtc + (3600000 * 6)).toISOString().split('T')[0];
-      return orderBst === todayBST;
-    }).length;
+  const handleToggle = async (id: string, currentState: boolean) => {
+    const idStr = String(id);
+    setActionId(idStr);
+    try {
+      await onToggleStatus(idStr, !currentState);
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const handleDelete = async (mod: User) => {
+    const idStr = String(mod.id);
+    if (confirm(`⚠️ TERMINATE ACCESS: ${mod.name}?\nএই মেম্বারকে ডাটাবেস থেকে স্থায়ীভাবে মুছে ফেলা হবে। আপনি কি নিশ্চিত?`)) {
+      setActionId(idStr);
+      try {
+        await onDeleteModerator(idStr);
+      } catch (err) {
+        console.error("Delete Action Failed:", err);
+      } finally {
+        setActionId(null);
+      }
+    }
+  };
+
+  const filteredModerators = moderators.filter(m => 
+    m.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    m.email.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  // Team Summary Stats
+  const teamStats = useMemo(() => {
+    const todayLeads = leads.filter(l => l.assignedDate === todayStr);
+    const todayCalled = todayLeads.filter(l => l.status !== 'pending');
+    const todayOrders = orders.filter(o => o.createdAt.split('T')[0] === todayStr);
     
     return {
-      totalOrders: modOrders.length,
-      todayOrders,
-      conversionRate: modLeads.length > 0 ? Math.round((modOrders.length / modLeads.length) * 100) : 0
+      totalLeads: todayLeads.length,
+      totalCalled: todayCalled.length,
+      totalOrders: todayOrders.length,
+      efficiency: todayLeads.length > 0 ? Math.round((todayCalled.length / todayLeads.length) * 100) : 0
     };
-  };
+  }, [leads, orders, todayStr]);
 
   return (
-    <div className="space-y-8 pb-10">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+    <div className="space-y-10 pb-20">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div>
-          <h2 className="text-4xl font-black text-slate-900 tracking-tight">Team Intelligence</h2>
-          <p className="text-slate-500 font-medium mt-1">Live analytics and portal credential management.</p>
+          <h2 className="text-5xl font-black text-slate-900 tracking-tighter italic">Team Intelligence</h2>
+          <div className="flex items-center gap-2 mt-2">
+            <span className="w-3 h-3 bg-indigo-500 rounded-full animate-pulse"></span>
+            <p className="text-slate-500 font-bold uppercase text-[10px] tracking-[0.3em]">Operational Unit Control Panel</p>
+          </div>
         </div>
-        <button
-          onClick={() => setIsAdding(!isAdding)}
-          className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-xl active:scale-95 flex items-center gap-2 ${
-            isAdding ? 'bg-slate-200 text-slate-600' : 'bg-blue-600 text-white shadow-blue-500/20 hover:bg-blue-700'
-          }`}
-        >
-          {isAdding ? 'Close Panel' : '+ Recruit Moderator'}
-        </button>
+        <div className="flex gap-4 w-full md:w-auto">
+          <input 
+            type="text" 
+            placeholder="Search member..." 
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="flex-1 md:w-64 px-6 py-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all shadow-sm"
+          />
+          <button
+            onClick={() => setIsAdding(!isAdding)}
+            className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-xl active:scale-95 ${
+              isAdding ? 'bg-slate-900 text-white' : 'bg-indigo-600 text-white shadow-indigo-500/20'
+            }`}
+          >
+            {isAdding ? 'Close Enrollment' : '+ Recruit Member'}
+          </button>
+        </div>
+      </div>
+
+      {/* Team Performance Summary Bar */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+         <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Team Today Leads</p>
+            <p className="text-2xl font-black text-slate-900 mt-1">{teamStats.totalLeads}</p>
+         </div>
+         <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total Calls Made</p>
+            <p className="text-2xl font-black text-blue-600 mt-1">{teamStats.totalCalled}</p>
+         </div>
+         <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Confirmed Orders</p>
+            <p className="text-2xl font-black text-emerald-600 mt-1">{teamStats.totalOrders}</p>
+         </div>
+         <div className="bg-slate-900 p-6 rounded-[2rem] text-white shadow-xl">
+            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Team Efficiency</p>
+            <p className="text-2xl font-black text-orange-500 mt-1">{teamStats.efficiency}%</p>
+         </div>
       </div>
 
       {isAdding && (
-        <div className="bg-white p-10 rounded-[2.5rem] shadow-sm border border-slate-100 animate-in slide-in-from-top-4 duration-500">
-          <div className="mb-8 border-l-4 border-blue-600 pl-4">
-            <h3 className="text-xl font-black text-slate-800 tracking-tight">Provision New Credentials</h3>
-            <p className="text-sm text-slate-400 font-bold">Accounts are created in "Active" state by default.</p>
+        <div className="bg-white p-10 rounded-[3rem] shadow-2xl border border-slate-100 animate-in slide-in-from-top-4 duration-500 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-50 rounded-full translate-x-1/2 -translate-y-1/2"></div>
+          <div className="relative z-10">
+            <div className="flex items-center gap-4 mb-8">
+              <div className="w-12 h-12 bg-indigo-600 text-white rounded-2xl flex items-center justify-center text-2xl shadow-lg font-black">?</div>
+              <div>
+                <h3 className="text-xl font-black text-slate-800 tracking-tight">Identity Token Generation</h3>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Assign new operational clearance</p>
+              </div>
+            </div>
+            <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              <div className="space-y-3">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Full Name</label>
+                <input required type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all" placeholder="e.g. Arif Hossain" />
+              </div>
+              <div className="space-y-3">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Access Email</label>
+                <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all" placeholder="name@baburchi.com" />
+              </div>
+              <div className="space-y-3">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Secure Password</label>
+                <input required type="text" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all" placeholder="Min 6 characters" />
+              </div>
+              <div className="md:col-span-3 flex justify-end pt-4">
+                <button 
+                  type="submit" 
+                  disabled={isVerifying}
+                  className={`bg-slate-950 text-white px-12 py-5 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-2xl transition-all hover:bg-black active:scale-95 flex items-center gap-3 ${isVerifying ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {isVerifying ? (
+                    <>
+                      <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Enrolling...
+                    </>
+                  ) : 'Verify & Enroll'}
+                </button>
+              </div>
+            </form>
           </div>
-          <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="space-y-2">
-              <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Full Identity</label>
-              <input required type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Moderator Name" />
-            </div>
-            <div className="space-y-2">
-              <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Login Email</label>
-              <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none" placeholder="email@baburchi.com" />
-            </div>
-            <div className="space-y-2">
-              <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Portal Password</label>
-              <input required type="text" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Secure Code" />
-            </div>
-            <div className="md:col-span-3 flex justify-end">
-              <button type="submit" className="bg-slate-950 hover:bg-black text-white px-12 py-5 rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] shadow-2xl active:scale-95">Complete Enrollment</button>
-            </div>
-          </form>
         </div>
       )}
 
-      <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-slate-50/50 border-b border-slate-100">
-              <tr>
-                <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Team Member</th>
-                <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Login Control</th>
-                <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Orders Today (BST)</th>
-                <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Lifetime Wins</th>
-                <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Heartbeat</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {moderators.map((mod: any) => {
-                const perf = getModPerformance(mod.id);
-                const online = isOnline(mod.lastSeen);
-                const isActive = mod.is_active !== false; 
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        {filteredModerators.length === 0 ? (
+          <div className="col-span-full py-24 text-center bg-white rounded-[3rem] border-2 border-dashed border-slate-100">
+             <div className="text-6xl mb-6 opacity-20">👥</div>
+             <p className="font-black text-slate-400 italic uppercase tracking-[0.2em]">No unit members found.</p>
+          </div>
+        ) : (
+          filteredModerators.map((mod: any) => {
+            const modIdStr = String(mod.id);
+            const online = isOnline(mod.lastSeen);
+            const isActive = mod.is_active !== false;
+            
+            // Performance Metrics
+            const todayLeads = leads.filter(l => String(l.moderatorId) === modIdStr && l.assignedDate === todayStr);
+            const todayCalled = todayLeads.filter(l => l.status !== 'pending').length;
+            const todayOrdersCount = orders.filter(o => String(o.moderatorId) === modIdStr && o.createdAt.split('T')[0] === todayStr).length;
+            const callCompletionRate = todayLeads.length > 0 ? Math.round((todayCalled / todayLeads.length) * 100) : 0;
 
-                return (
-                  <tr key={mod.id} className={`transition-all group ${!isActive ? 'bg-slate-50 opacity-60' : 'hover:bg-blue-50/20'}`}>
-                    <td className="px-8 py-6">
-                      <div className="flex items-center gap-4">
-                        <div className="relative">
-                          <div className={`h-14 w-14 rounded-[1.25rem] flex items-center justify-center text-lg font-black uppercase transition-all ${!isActive ? 'bg-slate-200 text-slate-400' : 'bg-slate-100 text-slate-500 shadow-sm'}`}>
-                            {mod.name.charAt(0)}
-                          </div>
-                          {isActive && (
-                            <div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-4 border-white ${online ? 'bg-emerald-500' : 'bg-slate-300'}`}></div>
-                          )}
-                        </div>
-                        <div>
-                          <p className={`font-black text-lg leading-none ${!isActive ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{mod.name}</p>
-                          <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-tight">{mod.email}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-8 py-6">
+            const isProcessing = actionId === modIdStr;
+
+            return (
+              <div key={modIdStr} className={`group relative bg-white p-8 rounded-[3rem] border transition-all duration-500 hover:shadow-2xl hover:shadow-indigo-500/10 hover:-translate-y-1 ${!isActive ? 'border-rose-100 bg-rose-50/10' : 'border-slate-100'} ${isProcessing ? 'opacity-40' : ''}`}>
+                <div className="flex justify-between items-center mb-8">
+                   <div className={`px-4 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest border ${online ? 'bg-emerald-50 text-emerald-500 border-emerald-100' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
+                     {online ? '● Online Now' : '○ Offline'}
+                   </div>
+                   <div className="flex items-center gap-3">
+                      <span className={`text-[9px] font-black uppercase tracking-tighter ${isActive ? 'text-emerald-500' : 'text-rose-500'}`}>
+                        {isActive ? 'Active Access' : 'Access Blocked'}
+                      </span>
                       <button 
-                        onClick={() => toggleStatus(mod.id, isActive)}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-2xl border transition-all active:scale-95 ${
-                          isActive 
-                          ? 'bg-emerald-50 text-emerald-600 border-emerald-100 hover:bg-emerald-100' 
-                          : 'bg-rose-50 text-rose-600 border-rose-100 hover:bg-rose-100'
-                        }`}
+                        disabled={isProcessing}
+                        onClick={() => handleToggle(modIdStr, isActive)}
+                        className={`w-12 h-6 rounded-full p-1 transition-all relative flex items-center ${isActive ? 'bg-indigo-600' : 'bg-rose-500'} ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
-                        <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
-                        <span className="text-[10px] font-black uppercase tracking-widest">{isActive ? 'Access: Active' : 'Access: Blocked'}</span>
+                        <div className={`w-4 h-4 bg-white rounded-full shadow-md transition-transform duration-300 ${isActive ? 'translate-x-6' : 'translate-x-0'}`}></div>
                       </button>
-                    </td>
-                    <td className="px-8 py-6 text-center">
-                      <div className={`inline-flex flex-col items-center px-4 py-2 rounded-2xl border ${perf.todayOrders > 0 ? 'bg-orange-50 border-orange-100' : 'bg-slate-50 border-slate-100'}`}>
-                        <span className={`text-xl font-black ${perf.todayOrders > 0 ? 'text-orange-600' : 'text-slate-400'}`}>{perf.todayOrders}</span>
-                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-tighter">Done Today</span>
-                      </div>
-                    </td>
-                    <td className="px-8 py-6 text-center">
-                      <div className="flex flex-col items-center">
-                        <span className="text-xl font-black text-slate-900">{perf.totalOrders}</span>
-                        <div className="flex items-center gap-2 mt-1">
-                          <div className="w-16 h-1 bg-slate-100 rounded-full overflow-hidden">
-                             <div className="h-full bg-blue-600" style={{ width: `${perf.conversionRate}%` }}></div>
-                          </div>
-                          <span className="text-[8px] font-black text-slate-400">{perf.conversionRate}% Conv.</span>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-8 py-6 text-right">
-                      <div className="flex flex-col">
-                        <span className={`text-[10px] font-black uppercase tracking-widest ${online && isActive ? 'text-emerald-500' : 'text-slate-400'}`}>
-                          {online && isActive ? '🟢 Syncing Now' : '⚪ Offline'}
-                        </span>
-                        <span className="text-xs font-bold text-slate-600">
-                          {mod.lastSeen ? new Date(mod.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Never Active'}
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                   </div>
+                </div>
+
+                <div className="flex items-center gap-6 mb-8">
+                  <div className={`w-20 h-20 rounded-[2rem] flex items-center justify-center font-black text-2xl shadow-xl transition-transform group-hover:scale-110 ${isActive ? 'bg-slate-950 text-white shadow-indigo-500/20' : 'bg-slate-200 text-slate-400'}`}>
+                    {mod.name.charAt(0)}
+                  </div>
+                  <div className="overflow-hidden">
+                    <h3 className="text-xl font-black text-slate-900 leading-none truncate">{mod.name}</h3>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2 truncate">{mod.email}</p>
+                    <div className="flex items-center gap-1 mt-3">
+                       <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full"></span>
+                       <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest">ID: {modIdStr}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Today's Stats Section */}
+                <div className="mb-8 p-6 bg-slate-50 rounded-[2rem] border border-slate-100">
+                  <div className="flex justify-between items-center mb-4">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Today's Pulse</p>
+                    <span className="text-[10px] font-black text-indigo-600">{callCompletionRate}% Done</span>
+                  </div>
+                  
+                  <div className="grid grid-cols-3 gap-2 mb-4">
+                    <div className="text-center">
+                       <p className="text-xs font-black text-slate-900 leading-none">{todayLeads.length}</p>
+                       <p className="text-[7px] font-bold text-slate-400 uppercase mt-1">Assigned</p>
+                    </div>
+                    <div className="text-center border-x border-slate-200">
+                       <p className="text-xs font-black text-blue-600 leading-none">{todayCalled}</p>
+                       <p className="text-[7px] font-bold text-slate-400 uppercase mt-1">Called</p>
+                    </div>
+                    <div className="text-center">
+                       <p className="text-xs font-black text-emerald-600 leading-none">{todayOrdersCount}</p>
+                       <p className="text-[7px] font-bold text-slate-400 uppercase mt-1">Orders</p>
+                    </div>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-indigo-500 transition-all duration-1000 ease-out"
+                      style={{ width: `${callCompletionRate}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                   <button 
+                     onClick={() => handleDelete(mod)}
+                     disabled={isProcessing}
+                     className={`flex-1 bg-rose-50 text-rose-500 hover:bg-rose-600 hover:text-white py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm active:scale-95 flex items-center justify-center gap-2 ${isProcessing ? 'cursor-not-allowed' : ''}`}
+                   >
+                     {isProcessing ? (
+                       <div className="w-3 h-3 border-2 border-rose-500 border-t-transparent rounded-full animate-spin"></div>
+                     ) : '🗑️ Delete Member'}
+                   </button>
+                   <button className="w-14 h-14 rounded-2xl bg-slate-950 text-white hover:bg-indigo-600 transition-all flex items-center justify-center text-xl shadow-lg shadow-indigo-500/10">
+                     👁️
+                   </button>
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );

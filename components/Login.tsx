@@ -54,7 +54,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, moderators, logoUrl }) => {
         // Verify the password
         if (dbUser.password === password) {
           onLogin({
-            id: dbUser.id,
+            id: String(dbUser.id),
             name: dbUser.name,
             email: dbUser.email,
             role: dbUser.role as UserRole

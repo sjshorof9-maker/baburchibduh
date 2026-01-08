@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, Order, OrderStatus, CourierConfig, Product, Lead, UserRole } from './types';
-import { INITIAL_PRODUCTS, ADMIN_USER } from './constants';
+import { User, Order, OrderStatus, CourierConfig, Product, Lead, UserRole, LeadStatus } from './types';
+import { INITIAL_PRODUCTS } from './constants';
 import { supabase } from './services/supabase';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
@@ -13,6 +13,7 @@ import Settings from './components/Settings';
 import ProductManager from './components/ProductManager';
 import LeadManager from './components/LeadManager';
 import ModeratorLeads from './components/ModeratorLeads';
+import CustomerManager from './components/CustomerManager';
 
 const SESSION_KEY = 'baburchi_user_session';
 
@@ -35,71 +36,19 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isLoading, setIsLoading] = useState(true);
 
+  // Redirect Moderator away from dashboard if they land on it
   useEffect(() => {
-    if (!currentUser || currentUser.role !== UserRole.MODERATOR) return;
+    if (currentUser && currentUser.role === UserRole.MODERATOR && activeTab === 'dashboard') {
+      setActiveTab('myleads');
+    }
+  }, [currentUser, activeTab]);
 
-    const updatePresence = async () => {
-      await supabase
-        .from('moderators')
-        .update({ last_seen: new Date().toISOString() })
-        .eq('id', currentUser.id);
-    };
-
-    updatePresence(); 
-    const interval = setInterval(updatePresence, 60000); 
-    return () => clearInterval(interval);
-  }, [currentUser]);
-
-  useEffect(() => {
-    const initApp = async () => {
-      try {
-        const savedUser = localStorage.getItem(SESSION_KEY);
-        if (savedUser) setCurrentUser(JSON.parse(savedUser));
-
-        const [
-          { data: dbProducts },
-          { data: dbModerators },
-          { data: dbOrders },
-          { data: dbLeads },
-          { data: dbSettings }
-        ] = await Promise.all([
-          supabase.from('products').select('*'),
-          supabase.from('moderators').select('*'),
-          supabase.from('orders').select('*').order('created_at', { ascending: false }),
-          supabase.from('leads').select('*').order('created_at', { ascending: false }),
-          supabase.from('settings').select('*').maybeSingle()
-        ]);
-
-        if (dbProducts && dbProducts.length > 0) setProducts(dbProducts);
-        else setProducts(INITIAL_PRODUCTS);
-
-        const mappedOrders = (dbOrders || []).map((o: any) => ({
-          id: String(o.id),
-          moderatorId: String(o.moderator_id),
-          customerName: String(o.customer_name || ''),
-          customerPhone: String(o.customer_phone || ''),
-          customerAddress: String(o.customer_address || ''),
-          items: Array.isArray(o.items) ? o.items : [],
-          totalAmount: Number(o.total_amount || 0),
-          status: o.status as OrderStatus,
-          createdAt: String(o.created_at),
-          notes: String(o.notes || ''),
-          steadfastId: o.steadfast_id ? String(o.steadfast_id) : undefined,
-          courierStatus: o.courier_status ? String(o.courier_status) : undefined
-        }));
-
-        const mappedLeads = (dbLeads || []).map((l: any) => ({
-          id: String(l.id),
-          phoneNumber: String(l.phone_number || ''),
-          customerName: String(l.customer_name || ''),
-          address: String(l.address || ''),
-          moderatorId: String(l.moderator_id || ''),
-          status: l.status,
-          assignedDate: String(l.assigned_date || ''),
-          createdAt: String(l.created_at)
-        }));
-
-        if (dbModerators) setModerators(dbModerators.map(m => ({
+  const fetchModerators = async () => {
+    try {
+      const { data, error } = await supabase.from('moderators').select('*');
+      if (error) throw error;
+      if (data) {
+        setModerators(data.map(m => ({
           id: String(m.id),
           name: String(m.name),
           email: String(m.email),
@@ -107,16 +56,82 @@ const App: React.FC = () => {
           lastSeen: m.last_seen,
           is_active: m.is_active !== false 
         })));
+      }
+    } catch (err) {
+      console.error("Fetch Moderators Error:", err);
+    }
+  };
 
-        setOrders(mappedOrders);
-        setLeads(mappedLeads);
+  useEffect(() => {
+    const initApp = async () => {
+      try {
+        const savedUser = localStorage.getItem(SESSION_KEY);
+        if (savedUser) {
+          const parsed = JSON.parse(savedUser);
+          setCurrentUser({ ...parsed, id: String(parsed.id) });
+        }
+
+        const [
+          { data: dbProducts },
+          { data: dbOrders, error: ordersError },
+          { data: dbLeads, error: leadsError },
+          { data: dbSettings }
+        ] = await Promise.all([
+          supabase.from('products').select('*'),
+          supabase.from('orders').select('*').order('created_at', { ascending: false }),
+          supabase.from('leads').select('*').order('created_at', { ascending: false }),
+          supabase.from('settings').select('*').maybeSingle()
+        ]);
+
+        if (ordersError) console.error("Database Fetch Error (Orders):", ordersError);
+        if (leadsError) console.error("Database Fetch Error (Leads):", leadsError);
+
+        await fetchModerators();
+
+        if (dbProducts && dbProducts.length > 0) setProducts(dbProducts);
+        else setProducts(INITIAL_PRODUCTS);
+
+        if (dbOrders) {
+          const mappedOrders = dbOrders.map((o: any) => ({
+            id: String(o.id),
+            moderatorId: String(o.moderator_id),
+            customerName: String(o.customer_name || ''),
+            customerPhone: String(o.customer_phone || ''),
+            customerAddress: String(o.customer_address || ''),
+            deliveryRegion: o.delivery_region || 'inside',
+            deliveryCharge: Number(o.delivery_charge || 0),
+            items: Array.isArray(o.items) ? o.items : [],
+            totalAmount: Number(o.total_amount || 0),
+            grandTotal: Number(o.grand_total || o.total_amount || 0),
+            status: o.status as OrderStatus,
+            createdAt: String(o.created_at),
+            steadfastId: o.steadfast_id ? String(o.steadfast_id) : undefined,
+            courierStatus: o.courier_status || undefined,
+            notes: o.notes || undefined
+          }));
+          setOrders(mappedOrders);
+        }
+
+        if (dbLeads) {
+          const mappedLeads = dbLeads.map((l: any) => ({
+            id: String(l.id),
+            phoneNumber: String(l.phone_number || ''),
+            customerName: String(l.customer_name || ''),
+            address: String(l.address || ''),
+            moderatorId: String(l.moderator_id || ''),
+            status: (l.status as LeadStatus) || 'pending',
+            assignedDate: String(l.assigned_date || ''),
+            createdAt: String(l.created_at)
+          }));
+          setLeads(mappedLeads);
+        }
         
         if (dbSettings) {
           setCourierConfig(dbSettings.courier_config || courierConfig);
           setLogoUrl(dbSettings.logo_url);
         }
       } catch (error) {
-        console.error("Init Error:", error);
+        console.error("Initialization Critical Error:", error);
       } finally {
         setIsLoading(false);
       }
@@ -124,41 +139,129 @@ const App: React.FC = () => {
     initApp();
   }, []);
 
-  const handleLogin = (user: User) => {
-    setCurrentUser(user);
-    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
-  };
-
-  const handleLogout = () => {
-    setCurrentUser(null);
-    localStorage.removeItem(SESSION_KEY);
-    setActiveTab('dashboard');
-  };
-
   const handleCreateOrder = async (newOrder: Order) => {
     try {
+      // 1. Prepare Database Payload
       const dbPayload = {
         id: newOrder.id,
-        moderator_id: newOrder.moderatorId,
+        moderator_id: String(newOrder.moderatorId),
         customer_name: newOrder.customerName,
         customer_phone: newOrder.customerPhone,
         customer_address: newOrder.customerAddress,
+        delivery_region: newOrder.deliveryRegion,
+        delivery_charge: newOrder.deliveryCharge,
         items: newOrder.items,
         total_amount: newOrder.totalAmount,
+        grand_total: newOrder.grandTotal,
         status: newOrder.status,
         created_at: newOrder.createdAt,
         notes: newOrder.notes || ''
       };
 
-      const { error: orderError } = await supabase.from('orders').insert([dbPayload]);
-      if (orderError) throw new Error(orderError.message);
+      // 2. Optimistic local update
+      const formattedOrder: Order = {
+        ...newOrder,
+        moderatorId: String(newOrder.moderatorId)
+      };
+      setOrders(prev => [formattedOrder, ...prev]);
+      setActiveTab('orders'); // Jump to Logistics tab to see results
 
-      setOrders(prev => [newOrder, ...prev]);
-      setActiveTab('orders'); 
-      alert(`🎉 Order ${newOrder.id} successfully created!`);
+      // 3. Update Inventory (locally and remote)
+      const updatedProducts = [...products];
+      for (const item of newOrder.items) {
+        const prodIdx = updatedProducts.findIndex(p => p.id === item.productId);
+        if (prodIdx !== -1) {
+          updatedProducts[prodIdx].stock -= item.quantity;
+          await supabase.from('products').update({ stock: updatedProducts[prodIdx].stock }).eq('id', item.productId);
+        }
+      }
+      setProducts(updatedProducts);
+
+      // 4. Remote database insert
+      const { error } = await supabase.from('orders').insert([dbPayload]);
+      if (error) {
+        console.error("Supabase Order Insert Error:", error);
+        throw new Error(error.message);
+      }
     } catch (err: any) {
-      console.error("handleCreateOrder Error:", err);
-      throw err;
+      alert("⚠️ Database Sync Failed: " + err.message);
+      // Re-fetch to ensure UI is in sync with server truth
+      const { data } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
+      if (data) {
+        setOrders(data.map((o: any) => ({
+          ...o,
+          id: String(o.id),
+          moderatorId: String(o.moderator_id),
+          totalAmount: Number(o.total_amount),
+          grandTotal: Number(o.grand_total),
+          deliveryCharge: Number(o.delivery_charge)
+        })));
+      }
+    }
+  };
+
+  const handleAddModerator = async (newMod: User & { password?: string }) => {
+    try {
+      const generatedId = Math.floor(100000 + Math.random() * 899999);
+      const { data, error } = await supabase
+        .from('moderators')
+        .insert([{
+          id: generatedId,
+          name: newMod.name,
+          email: newMod.email,
+          role: newMod.role,
+          password: newMod.password,
+          is_active: true
+        }])
+        .select();
+
+      if (error) throw new Error(error.message);
+
+      if (data && data.length > 0) {
+        const added = data[0];
+        const formattedMod: User = {
+          id: String(added.id),
+          name: added.name,
+          email: added.email,
+          role: added.role as UserRole,
+          is_active: added.is_active !== false
+        };
+        setModerators(prev => [...prev, formattedMod]);
+        return true;
+      }
+    } catch (err: any) {
+      alert("Recruitment Error: " + (err.message || "Could not save moderator."));
+      return false;
+    }
+  };
+
+  const handleDeleteModerator = async (modId: string) => {
+    const idToDelete = String(modId);
+    const hasOrders = orders.some(o => String(o.moderatorId) === idToDelete);
+    const hasLeads = leads.some(l => String(l.moderatorId) === idToDelete);
+    if (hasOrders || hasLeads) {
+      alert("⚠️ মডারেটর ডিলিট করা সম্ভব নয়!\nএই মডারেটরের নামে ডাটাবেসে অর্ডার অথবা লিড রেকর্ড রয়েছে।");
+      return;
+    }
+    const backupModerators = [...moderators];
+    setModerators(prev => prev.filter(m => String(m.id) !== idToDelete));
+    try {
+      const { error } = await supabase.from('moderators').delete().eq('id', idToDelete);
+      if (error) {
+        setModerators(backupModerators);
+        alert(`❌ Delete Failed: ${error.message}`);
+      }
+    } catch (err: any) {
+      setModerators(backupModerators);
+      alert("❌ Network Error: Could not reach server.");
+    }
+  };
+
+  const handleToggleModeratorStatus = async (modId: string, newActiveState: boolean) => {
+    const idStr = String(modId);
+    const { error } = await supabase.from('moderators').update({ is_active: newActiveState }).eq('id', idStr);
+    if (!error) {
+      setModerators(prev => prev.map(m => String(m.id) === idStr ? { ...m, is_active: newActiveState } : m));
     }
   };
 
@@ -171,17 +274,9 @@ const App: React.FC = () => {
     await supabase.from('orders').update(updateObj).eq('id', orderId);
   };
 
-  const handleAddModerator = async (newMod: User & { password?: string, is_active?: boolean }) => {
-    const { error } = await supabase.from('moderators').insert([newMod]);
-    if (!error) setModerators(prev => [...prev, newMod]);
-    else alert("Error: " + error.message);
-  };
-
-  const handleDeleteModerator = async (modId: string) => {
-    if (confirm('Delete this moderator?')) {
-      const { error } = await supabase.from('moderators').delete().eq('id', modId);
-      if (!error) setModerators(prev => prev.filter(m => m.id !== modId));
-    }
+  const handleBulkStatusUpdate = async (orderIds: string[], newStatus: OrderStatus) => {
+    setOrders(prev => prev.map(o => orderIds.includes(o.id) ? { ...o, status: newStatus } : o));
+    await supabase.from('orders').update({ status: newStatus }).in('id', orderIds);
   };
 
   const handleUpdateConfig = async (newConfig: CourierConfig) => {
@@ -215,7 +310,7 @@ const App: React.FC = () => {
       phone_number: l.phoneNumber,
       customer_name: l.customerName || '',
       address: l.address || '',
-      moderator_id: l.moderatorId,
+      moderator_id: String(l.moderatorId),
       status: l.status,
       assigned_date: l.assignedDate,
       created_at: l.createdAt
@@ -225,21 +320,21 @@ const App: React.FC = () => {
     setLeads(prev => [...prev, ...newLeads]);
   };
 
-  const handleBulkUpdateLeads = async (indices: number[], modId: string, date: string) => {
-    const newList = [...leads];
-    const updates = [];
-    indices.forEach(idx => {
-      if (newList[idx]) {
-        const lead = newList[idx];
-        newList[idx] = { ...lead, moderatorId: modId, assignedDate: date, status: 'new' };
-        updates.push(supabase.from('leads').update({ moderator_id: modId, assigned_date: date, status: 'new' }).eq('id', lead.id));
-      }
-    });
-    await Promise.all(updates);
-    setLeads(newList);
+  const handleBulkUpdateLeads = async (leadIds: string[], modId: string, date: string) => {
+    if (leadIds.length === 0) return;
+    setLeads(prev => prev.map(l => leadIds.includes(l.id) ? { ...l, moderatorId: String(modId), assignedDate: date, status: 'pending' as LeadStatus } : l));
+    try {
+      const { error } = await supabase
+        .from('leads')
+        .update({ moderator_id: String(modId), assigned_date: date, status: 'pending' })
+        .in('id', leadIds);
+      if (error) throw error;
+    } catch (err: any) {
+      console.error("Bulk Assignment Error:", err);
+    }
   };
 
-  const handleUpdateLeadStatus = async (leadId: string, status: 'new' | 'called') => {
+  const handleUpdateLeadStatus = async (leadId: string, status: LeadStatus) => {
     const { error } = await supabase.from('leads').update({ status }).eq('id', leadId);
     if (!error) setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status } : l));
   };
@@ -249,13 +344,29 @@ const App: React.FC = () => {
     if (!error) setLeads(prev => prev.filter(l => l.id !== leadId));
   };
 
+  const handleLogin = (user: User) => {
+    const sanitizedUser = { ...user, id: String(user.id) };
+    setCurrentUser(sanitizedUser);
+    localStorage.setItem(SESSION_KEY, JSON.stringify(sanitizedUser));
+    
+    // Default tab after login
+    if (sanitizedUser.role === UserRole.MODERATOR) {
+      setActiveTab('myleads');
+    } else {
+      setActiveTab('dashboard');
+    }
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem(SESSION_KEY);
+    setActiveTab('dashboard');
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#0f172a]">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
-          <div className="text-orange-500 font-black uppercase tracking-widest text-sm">Loading Workspace...</div>
-        </div>
+        <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
       </div>
     );
   }
@@ -267,12 +378,13 @@ const App: React.FC = () => {
   return (
     <Layout user={currentUser} onLogout={handleLogout} activeTab={activeTab} setActiveTab={setActiveTab} logoUrl={logoUrl}>
       <div className="animate-in fade-in duration-500">
-        {activeTab === 'dashboard' && <Dashboard orders={orders} products={products} leads={leads} currentUser={currentUser} moderators={moderators} />}
-        {activeTab === 'create' && <OrderForm products={products} currentUser={currentUser} onOrderCreate={handleCreateOrder} leads={leads} />}
-        {activeTab === 'orders' && <OrderList orders={orders} currentUser={currentUser} products={products} moderators={moderators} courierConfig={courierConfig} onUpdateStatus={handleUpdateStatus} logoUrl={logoUrl} />}
-        {activeTab === 'leads' && currentUser.role === UserRole.ADMIN && <LeadManager moderators={moderators} leads={leads} onAssignLeads={handleAssignLeads} onBulkUpdateLeads={handleBulkUpdateLeads} onDeleteLead={handleDeleteLead} />}
-        {activeTab === 'myleads' && currentUser.role === UserRole.MODERATOR && <ModeratorLeads leads={leads.filter(l => l.moderatorId === currentUser.id)} onUpdateStatus={handleUpdateLeadStatus} />}
-        {activeTab === 'moderators' && currentUser.role === UserRole.ADMIN && <ModeratorManager moderators={moderators} leads={leads} orders={orders} onAddModerator={handleAddModerator} onDeleteModerator={handleDeleteModerator} />}
+        {activeTab === 'dashboard' && currentUser.role === UserRole.ADMIN && <Dashboard orders={orders} products={products} leads={leads} currentUser={currentUser} moderators={moderators} />}
+        {activeTab === 'create' && <OrderForm products={products} currentUser={currentUser} onOrderCreate={handleCreateOrder} leads={leads} allOrders={orders} />}
+        {activeTab === 'orders' && <OrderList orders={orders} currentUser={currentUser} products={products} moderators={moderators} courierConfig={courierConfig} onUpdateStatus={handleUpdateStatus} onBulkUpdateStatus={handleBulkStatusUpdate} logoUrl={logoUrl} />}
+        {activeTab === 'leads' && currentUser.role === UserRole.ADMIN && <LeadManager moderators={moderators} leads={leads} orders={orders} onAssignLeads={handleAssignLeads} onBulkUpdateLeads={handleBulkUpdateLeads} onDeleteLead={handleDeleteLead} />}
+        {activeTab === 'customers' && currentUser.role === UserRole.ADMIN && <CustomerManager orders={orders} leads={leads} />}
+        {activeTab === 'myleads' && currentUser.role === UserRole.MODERATOR && <ModeratorLeads leads={leads.filter(l => String(l.moderatorId) === String(currentUser.id))} onUpdateStatus={handleUpdateLeadStatus} />}
+        {activeTab === 'moderators' && currentUser.role === UserRole.ADMIN && <ModeratorManager moderators={moderators} leads={leads} orders={orders} onAddModerator={handleAddModerator} onDeleteModerator={handleDeleteModerator} onToggleStatus={handleToggleModeratorStatus} />}
         {activeTab === 'products' && currentUser.role === UserRole.ADMIN && <ProductManager products={products} onAddProduct={handleAddProduct} onUpdateProduct={handleUpdateProduct} onDeleteProduct={handleDeleteProduct} />}
         {activeTab === 'settings' && currentUser.role === UserRole.ADMIN && <Settings config={courierConfig} onSave={handleUpdateConfig} logoUrl={logoUrl} onUpdateLogo={handleUpdateLogo} />}
       </div>

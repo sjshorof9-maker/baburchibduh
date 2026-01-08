@@ -2,8 +2,12 @@
 export enum OrderStatus {
   PENDING = 'pending',
   CONFIRMED = 'confirmed',
+  PROCESSING = 'processing',
+  SHIPPED = 'shipped',
   DELIVERED = 'delivered',
-  CANCELLED = 'cancelled'
+  CANCELLED = 'cancelled',
+  RETURNED = 'returned',
+  ON_HOLD = 'on_hold'
 }
 
 export enum UserRole {
@@ -16,15 +20,16 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
-  lastSeen?: string; // Track when moderator was last active
+  lastSeen?: string;
+  is_active?: boolean;
 }
 
 export interface Product {
   id: string;
-  sku: string; // Product Code
+  sku: string;
   name: string;
   price: number;
-  stock?: number;
+  stock: number;
 }
 
 export interface OrderItem {
@@ -43,14 +48,16 @@ export interface CourierConfig {
   accountPassword?: string;
 }
 
+export type LeadStatus = 'pending' | 'confirmed' | 'communication' | 'no-response';
+
 export interface Lead {
   id: string;
   phoneNumber: string;
-  customerName?: string; // Added for CRM auto-fill
-  address?: string;      // Added for CRM auto-fill
+  customerName?: string;
+  address?: string;
   moderatorId: string;
-  status: 'new' | 'called';
-  assignedDate: string; // YYYY-MM-DD
+  status: LeadStatus;
+  assignedDate: string;
   createdAt: string;
 }
 
@@ -60,12 +67,14 @@ export interface Order {
   customerName: string;
   customerPhone: string;
   customerAddress: string;
+  deliveryRegion: 'inside' | 'outside' | 'sub';
+  deliveryCharge: number;
   items: OrderItem[];
-  totalAmount: number;
+  totalAmount: number; // Subtotal
+  grandTotal: number;  // Subtotal + Delivery
   status: OrderStatus;
   createdAt: string;
   notes?: string;
-  // Courier Integration Fields
   steadfastId?: string;
   courierStatus?: string;
 }

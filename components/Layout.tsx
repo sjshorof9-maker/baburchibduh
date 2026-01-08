@@ -14,22 +14,22 @@ interface LayoutProps {
 const Layout: React.FC<LayoutProps> = ({ user, onLogout, children, activeTab, setActiveTab, logoUrl }) => {
   const isAdmin = user.role === UserRole.ADMIN;
 
-  const navItems = [
-    { id: 'dashboard', name: 'Home', icon: '📊', mobile: true },
-    { id: 'orders', name: 'Orders', icon: '📦', mobile: true },
-    ...(isAdmin 
-      ? [
-          { id: 'leads', name: 'Leads', icon: '📞', mobile: true },
-          { id: 'products', name: 'Stock', icon: '🛒', mobile: false },
-          { id: 'moderators', name: 'Team', icon: '👥', mobile: false },
-          { id: 'settings', name: 'Settings', icon: '⚙️', mobile: true }
-        ] 
-      : [
-          { id: 'create', name: 'New', icon: '➕', mobile: true },
-          { id: 'myleads', name: 'Calls', icon: '📞', mobile: true }
-        ]
-    ),
-  ];
+  const navItems = isAdmin 
+    ? [
+        { id: 'dashboard', name: 'Home', icon: '📊', mobile: true },
+        { id: 'orders', name: 'Orders', icon: '📦', mobile: true },
+        { id: 'create', name: 'New', icon: '➕', mobile: true },
+        { id: 'leads', name: 'Leads', icon: '📞', mobile: true },
+        { id: 'customers', name: 'Clients', icon: '👤', mobile: true },
+        { id: 'products', name: 'Stock', icon: '🛒', mobile: false },
+        { id: 'moderators', name: 'Team', icon: '👥', mobile: false },
+        { id: 'settings', name: 'Settings', icon: '⚙️', mobile: true }
+      ]
+    : [
+        { id: 'myleads', name: 'Calls', icon: '📞', mobile: true },
+        { id: 'orders', name: 'Orders', icon: '📦', mobile: true },
+        { id: 'create', name: 'New', icon: '➕', mobile: true }
+      ];
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-[#f8fafc]">
@@ -130,7 +130,7 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, children, activeTab, se
             )}
           </button>
         ))}
-        {/* Mobile Settings/Signout Trigger */}
+        {/* Mobile Signout Trigger for Moderators */}
         {!isAdmin && (
            <button
              onClick={onLogout}
