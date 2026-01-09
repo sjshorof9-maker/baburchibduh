@@ -18,6 +18,7 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, children, activeTab, se
     ? [
         { id: 'dashboard', name: 'Home', icon: '📊', mobile: true },
         { id: 'orders', name: 'Orders', icon: '📦', mobile: true },
+        { id: 'messages', name: 'Messages', icon: '💬', mobile: true, highlight: true },
         { id: 'create', name: 'New', icon: '➕', mobile: true },
         { id: 'leads', name: 'Leads', icon: '📞', mobile: true },
         { id: 'customers', name: 'Clients', icon: '👤', mobile: true },
@@ -28,6 +29,7 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, children, activeTab, se
     : [
         { id: 'myleads', name: 'Calls', icon: '📞', mobile: true },
         { id: 'orders', name: 'Orders', icon: '📦', mobile: true },
+        { id: 'messages', name: 'Messages', icon: '💬', mobile: true, highlight: true },
         { id: 'create', name: 'New', icon: '➕', mobile: true }
       ];
 
@@ -71,17 +73,25 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, children, activeTab, se
         </div>
 
         <nav className="mt-6 px-4 space-y-1 flex-1">
-          {navItems.map((item) => (
+          {navItems.map((item: any) => (
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-bold rounded-xl transition-all ${
+              className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-bold rounded-xl transition-all relative ${
                 activeTab === item.id
                   ? 'bg-orange-600 text-white shadow-lg shadow-orange-500/20 translate-x-1'
                   : 'text-slate-500 hover:bg-slate-900 hover:text-white'
               }`}
             >
-              <span className="text-lg">{item.icon}</span>
+              <span className="text-lg relative">
+                {item.icon}
+                {item.highlight && activeTab !== 'messages' && (
+                  <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500"></span>
+                  </span>
+                )}
+              </span>
               {item.name}
             </button>
           ))}
@@ -106,21 +116,27 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, children, activeTab, se
 
       {/* Mobile Bottom Navigation (Hidden on Desktop) */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-2 py-3 flex justify-around items-center z-50 pb-safe shadow-[0_-10px_25px_-5px_rgba(0,0,0,0.1)]">
-        {navItems.filter(item => item.mobile).map((item) => (
+        {navItems.filter(item => item.mobile).map((item: any) => (
           <button
             key={item.id}
             onClick={() => {
               setActiveTab(item.id);
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            className={`flex flex-col items-center gap-1 transition-all px-3 py-1 rounded-xl ${
+            className={`flex flex-col items-center gap-1 transition-all px-3 py-1 rounded-xl relative ${
               activeTab === item.id 
               ? 'text-orange-600' 
               : 'text-slate-400'
             }`}
           >
-            <span className={`text-xl transition-transform ${activeTab === item.id ? 'scale-125' : ''}`}>
+            <span className={`text-xl transition-transform relative ${activeTab === item.id ? 'scale-125' : ''}`}>
               {item.icon}
+              {item.highlight && activeTab !== 'messages' && (
+                <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500"></span>
+                </span>
+              )}
             </span>
             <span className={`text-[9px] font-black uppercase tracking-tighter ${activeTab === item.id ? 'opacity-100' : 'opacity-70'}`}>
               {item.name}
@@ -130,16 +146,6 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, children, activeTab, se
             )}
           </button>
         ))}
-        {/* Mobile Signout Trigger for Moderators */}
-        {!isAdmin && (
-           <button
-             onClick={onLogout}
-             className="flex flex-col items-center gap-1 text-slate-400"
-           >
-             <span className="text-xl">🚪</span>
-             <span className="text-[9px] font-black uppercase tracking-tighter">Exit</span>
-           </button>
-        )}
       </nav>
     </div>
   );

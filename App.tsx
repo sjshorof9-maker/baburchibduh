@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, Order, OrderStatus, CourierConfig, Product, Lead, UserRole, LeadStatus } from './types';
-import { INITIAL_PRODUCTS } from './constants';
+import { User, Order, OrderStatus, CourierConfig, Product, Lead, UserRole, LeadStatus, Message } from './types';
+import { INITIAL_PRODUCTS, ADMIN_USER } from './constants';
 import { supabase } from './services/supabase';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
@@ -14,6 +14,7 @@ import ProductManager from './components/ProductManager';
 import LeadManager from './components/LeadManager';
 import ModeratorLeads from './components/ModeratorLeads';
 import CustomerManager from './components/CustomerManager';
+import Messenger from './components/Messenger';
 
 const SESSION_KEY = 'baburchi_user_session';
 
@@ -35,6 +36,54 @@ const App: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isLoading, setIsLoading] = useState(true);
+  const [notification, setNotification] = useState<{sender: string, text: string} | null>(null);
+
+  // Global Message Listener for Notifications
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const channel = supabase
+      .channel('global_notifications')
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'messages' 
+      }, async (payload) => {
+        const msg = payload.new as Message;
+        
+        // Only notify if the message is for the current user and we are NOT in the messages tab
+        if (msg.receiver_id === currentUser.id && activeTab !== 'messages') {
+          // Fetch sender name
+          let senderName = "Someone";
+          if (msg.sender_id === ADMIN_USER.id) {
+            senderName = "Admin";
+          } else {
+            const { data } = await supabase.from('moderators').select('name').eq('id', msg.sender_id).single();
+            if (data) senderName = data.name;
+          }
+
+          setNotification({
+            sender: senderName,
+            text: msg.content.length > 40 ? msg.content.substring(0, 40) + '...' : msg.content
+          });
+
+          // Play a subtle notification sound (optional, browser permitting)
+          try {
+            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3');
+            audio.volume = 0.3;
+            audio.play();
+          } catch (e) {}
+
+          // Auto-hide notification
+          setTimeout(() => setNotification(null), 5000);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser, activeTab]);
 
   // Redirect Moderator away from dashboard if they land on it
   useEffect(() => {
@@ -102,6 +151,7 @@ const App: React.FC = () => {
             deliveryCharge: Number(o.delivery_charge || 0),
             items: Array.isArray(o.items) ? o.items : [],
             totalAmount: Number(o.total_amount || 0),
+            advanceAmount: Number(o.advance_amount || 0),
             grandTotal: Number(o.grand_total || o.total_amount || 0),
             status: o.status as OrderStatus,
             createdAt: String(o.created_at),
@@ -152,6 +202,7 @@ const App: React.FC = () => {
         delivery_charge: newOrder.deliveryCharge,
         items: newOrder.items,
         total_amount: newOrder.totalAmount,
+        advance_amount: newOrder.advanceAmount,
         grand_total: newOrder.grandTotal,
         status: newOrder.status,
         created_at: newOrder.createdAt,
@@ -164,7 +215,7 @@ const App: React.FC = () => {
         moderatorId: String(newOrder.moderatorId)
       };
       setOrders(prev => [formattedOrder, ...prev]);
-      setActiveTab('orders'); // Jump to Logistics tab to see results
+      setActiveTab('orders'); 
 
       // 3. Update Inventory (locally and remote)
       const updatedProducts = [...products];
@@ -185,7 +236,6 @@ const App: React.FC = () => {
       }
     } catch (err: any) {
       alert("⚠️ Database Sync Failed: " + err.message);
-      // Re-fetch to ensure UI is in sync with server truth
       const { data } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
       if (data) {
         setOrders(data.map((o: any) => ({
@@ -194,7 +244,8 @@ const App: React.FC = () => {
           moderatorId: String(o.moderator_id),
           totalAmount: Number(o.total_amount),
           grandTotal: Number(o.grand_total),
-          deliveryCharge: Number(o.delivery_charge)
+          deliveryCharge: Number(o.delivery_charge),
+          advanceAmount: Number(o.advance_amount || 0)
         })));
       }
     }
@@ -349,7 +400,6 @@ const App: React.FC = () => {
     setCurrentUser(sanitizedUser);
     localStorage.setItem(SESSION_KEY, JSON.stringify(sanitizedUser));
     
-    // Default tab after login
     if (sanitizedUser.role === UserRole.MODERATOR) {
       setActiveTab('myleads');
     } else {
@@ -377,12 +427,28 @@ const App: React.FC = () => {
 
   return (
     <Layout user={currentUser} onLogout={handleLogout} activeTab={activeTab} setActiveTab={setActiveTab} logoUrl={logoUrl}>
+      {notification && (
+        <div 
+          onClick={() => { setActiveTab('messages'); setNotification(null); }}
+          className="fixed top-6 right-6 z-[999] bg-slate-900 border border-white/10 text-white p-6 rounded-[2rem] shadow-2xl cursor-pointer animate-in slide-in-from-right-10 duration-500 flex items-center gap-5 hover:bg-slate-800"
+        >
+          <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-xl shadow-lg">💬</div>
+          <div>
+            <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">New Transmission</p>
+            <h4 className="font-black text-sm">{notification.sender}</h4>
+            <p className="text-xs text-slate-400 mt-0.5">{notification.text}</p>
+          </div>
+          <button onClick={(e) => { e.stopPropagation(); setNotification(null); }} className="ml-4 text-slate-500 hover:text-white">✕</button>
+        </div>
+      )}
+
       <div className="animate-in fade-in duration-500">
         {activeTab === 'dashboard' && currentUser.role === UserRole.ADMIN && <Dashboard orders={orders} products={products} leads={leads} currentUser={currentUser} moderators={moderators} />}
         {activeTab === 'create' && <OrderForm products={products} currentUser={currentUser} onOrderCreate={handleCreateOrder} leads={leads} allOrders={orders} />}
         {activeTab === 'orders' && <OrderList orders={orders} currentUser={currentUser} products={products} moderators={moderators} courierConfig={courierConfig} onUpdateStatus={handleUpdateStatus} onBulkUpdateStatus={handleBulkStatusUpdate} logoUrl={logoUrl} />}
         {activeTab === 'leads' && currentUser.role === UserRole.ADMIN && <LeadManager moderators={moderators} leads={leads} orders={orders} onAssignLeads={handleAssignLeads} onBulkUpdateLeads={handleBulkUpdateLeads} onDeleteLead={handleDeleteLead} />}
         {activeTab === 'customers' && currentUser.role === UserRole.ADMIN && <CustomerManager orders={orders} leads={leads} />}
+        {activeTab === 'messages' && <Messenger currentUser={currentUser} moderators={moderators} />}
         {activeTab === 'myleads' && currentUser.role === UserRole.MODERATOR && <ModeratorLeads leads={leads.filter(l => String(l.moderatorId) === String(currentUser.id))} onUpdateStatus={handleUpdateLeadStatus} />}
         {activeTab === 'moderators' && currentUser.role === UserRole.ADMIN && <ModeratorManager moderators={moderators} leads={leads} orders={orders} onAddModerator={handleAddModerator} onDeleteModerator={handleDeleteModerator} onToggleStatus={handleToggleModeratorStatus} />}
         {activeTab === 'products' && currentUser.role === UserRole.ADMIN && <ProductManager products={products} onAddProduct={handleAddProduct} onUpdateProduct={handleUpdateProduct} onDeleteProduct={handleDeleteProduct} />}

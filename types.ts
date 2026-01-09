@@ -24,6 +24,15 @@ export interface User {
   is_active?: boolean;
 }
 
+export interface Message {
+  id: string;
+  sender_id: string;
+  receiver_id: string;
+  content: string;
+  created_at: string;
+  is_read: boolean;
+}
+
 export interface Product {
   id: string;
   sku: string;
@@ -67,11 +76,12 @@ export interface Order {
   customerName: string;
   customerPhone: string;
   customerAddress: string;
-  deliveryRegion: 'inside' | 'outside' | 'sub';
+  deliveryRegion: 'inside' | 'outside';
   deliveryCharge: number;
   items: OrderItem[];
   totalAmount: number; // Subtotal
-  grandTotal: number;  // Subtotal + Delivery
+  advanceAmount: number; // New field for advance payment
+  grandTotal: number;  // (Subtotal + Delivery) - Advance
   status: OrderStatus;
   createdAt: string;
   notes?: string;
